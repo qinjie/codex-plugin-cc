@@ -19,12 +19,16 @@ Target file:
 - If the user asks for `spark`, map it to `gpt-5.3-codex-spark`.
 - Leave `--model` and `--effort` unset unless the user supplied them.
 
+Path safety (do this before running Codex):
+- Verify the target file exists by opening it with the `Read` tool, not with a shell command. This confirms the path is a real file rather than an injection payload.
+- Refuse to run if the path contains shell metacharacters — quotes (`'` or `"`), `$`, backticks, `;`, `|`, `&`, `(`, `)`, `<`, `>`, newlines, or `\`. Tell the user to rename or move the file to a plain path instead. Never pass such a path into a shell command.
+
 Review step (read-only Codex):
 - Run Codex in the foreground through the shared `task` runtime. Do NOT pass `--write`: Codex must only read and critique the file, not edit it.
-- Pass a prompt that names the file path and asks for specific, actionable revisions. Use this shape, substituting the real path and any `--model`/`--effort` flags the user gave:
+- Pass a prompt that names the file path and asks for specific, actionable revisions. Enclose the whole prompt in single quotes so the substituted path cannot be interpreted by the shell, and substitute the real path plus any `--model`/`--effort` flags the user gave:
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/scripts/codex-companion.mjs" task "Read the plan/spec file at <file>. Review it as a planning document, not code. Return specific, actionable revisions: gaps, internal contradictions, unclear or ambiguous requirements, missing edge cases, and unstated assumptions. For each point, say what to change and why. Do not rewrite the whole document; do not praise. If the document is already sound, say so explicitly."
+node "${CLAUDE_PLUGIN_ROOT}/scripts/codex-companion.mjs" task 'Read the plan/spec file at <file>. Review it as a planning document, not code. Return specific, actionable revisions: gaps, internal contradictions, unclear or ambiguous requirements, missing edge cases, and unstated assumptions. For each point, say what to change and why. Do not rewrite the whole document; do not praise. If the document is already sound, say so explicitly.'
 ```
 
 - This runs foreground so the feedback is available to fold in this turn. Do not run it in the background.
