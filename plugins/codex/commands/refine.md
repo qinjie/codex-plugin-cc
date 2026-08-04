@@ -44,3 +44,11 @@ Fold-in step (Claude edits the file):
 Report:
 - After editing, give a short summary of what changed and list any feedback you chose not to apply, with a one-line reason.
 - Do not paste Codex's raw output verbatim; the point of this command is to act on it.
+
+<!-- LOCAL PATCH (refine-command): /codex:refine is NOT an upstream codex-plugin-cc command. This
+     file is installed into the disposable plugin cache, so a version bump drops it — and the
+     review-loop hook's own cap/overflow warnings tell the user to run it. The canonical copy lives
+     at ~/Documents/claude-setup-review-loop-with-codex/plugin-commands/refine.md and is
+     auto-re-installed by that repo's hooks/commit-review-loop.mjs after plugin updates. The marker
+     comment is what marks this file as ours: without it the installer treats an existing refine.md
+     as upstream's and leaves it alone. -->
