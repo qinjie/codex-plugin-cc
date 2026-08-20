@@ -2185,6 +2185,52 @@ test("commands lazily start and reuse one shared app-server after first use", as
   assert.equal(cleanup.status, 0, cleanup.stderr);
 });
 
+test("an idle shared broker exits so completed threads cannot retain MCP processes", async (t) => {
+  const repo = makeTempDir();
+  const binDir = makeTempDir();
+  installFakeCodex(binDir);
+  initGitRepo(repo);
+  fs.writeFileSync(path.join(repo, "README.md"), "hello\n");
+  run("git", ["add", "README.md"], { cwd: repo });
+  run("git", ["commit", "-m", "init"], { cwd: repo });
+  fs.writeFileSync(path.join(repo, "README.md"), "hello again\n");
+
+  const env = {
+    ...buildEnv(binDir),
+    CODEX_COMPANION_BROKER_IDLE_TIMEOUT_MS: "100"
+  };
+  t.after(() => {
+    run("node", [SESSION_HOOK, "SessionEnd"], {
+      cwd: repo,
+      env,
+      input: JSON.stringify({
+        hook_event_name: "SessionEnd",
+        cwd: repo
+      })
+    });
+  });
+
+  const review = run("node", [SCRIPT, "review"], {
+    cwd: repo,
+    env
+  });
+  assert.equal(review.status, 0, review.stderr);
+
+  const brokerSession = loadBrokerSession(repo);
+  if (!brokerSession) {
+    return;
+  }
+
+  await waitFor(() => {
+    try {
+      process.kill(brokerSession.pid, 0);
+      return false;
+    } catch (error) {
+      return error?.code === "ESRCH";
+    }
+  });
+});
+
 test("setup reuses an existing shared app-server without starting another one", () => {
   const repo = makeTempDir();
   const binDir = makeTempDir();

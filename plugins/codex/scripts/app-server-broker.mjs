@@ -10,6 +10,18 @@ import { BROKER_BUSY_RPC_CODE, CodexAppServerClient } from "./lib/app-server.mjs
 import { parseBrokerEndpoint } from "./lib/broker-endpoint.mjs";
 
 const STREAMING_METHODS = new Set(["turn/start", "review/start", "thread/compact/start"]);
+const DEFAULT_IDLE_SHUTDOWN_MS = 30000;
+
+/* LOCAL PATCH (broker-idle-shutdown): Codex starts one MCP process set per
+ * loaded thread and retains ephemeral threads until app-server exit. Bound the
+ * detached broker lifetime so completed plugin commands cannot accumulate MCP
+ * processes for the full Claude session. */
+function resolveIdleShutdownMs() {
+  const configured = Number(process.env.CODEX_COMPANION_BROKER_IDLE_TIMEOUT_MS);
+  return Number.isFinite(configured) && configured >= 0
+    ? configured
+    : DEFAULT_IDLE_SHUTDOWN_MS;
+}
 
 function buildStreamThreadIds(method, params, result) {
   const threadIds = new Set();
@@ -70,6 +82,15 @@ async function main() {
   let activeStreamSocket = null;
   let activeStreamThreadIds = null;
   const sockets = new Set();
+  const idleShutdownMs = resolveIdleShutdownMs();
+  let idleShutdownTimer = null;
+
+  function cancelIdleShutdown() {
+    if (idleShutdownTimer) {
+      clearTimeout(idleShutdownTimer);
+      idleShutdownTimer = null;
+    }
+  }
 
   function clearSocketOwnership(socket) {
     if (activeRequestSocket === socket) {
@@ -113,9 +134,26 @@ async function main() {
     }
   }
 
+  function scheduleIdleShutdown() {
+    cancelIdleShutdown();
+    if (sockets.size > 0) {
+      return;
+    }
+
+    idleShutdownTimer = setTimeout(() => {
+      idleShutdownTimer = null;
+      if (sockets.size > 0) {
+        return;
+      }
+      process.kill(process.pid, "SIGTERM");
+    }, idleShutdownMs);
+    idleShutdownTimer.unref?.();
+  }
+
   appClient.setNotificationHandler(routeNotification);
 
   const server = net.createServer((socket) => {
+    cancelIdleShutdown();
     sockets.add(socket);
     socket.setEncoding("utf8");
     let buffer = "";
@@ -225,11 +263,13 @@ async function main() {
     socket.on("close", () => {
       sockets.delete(socket);
       clearSocketOwnership(socket);
+      scheduleIdleShutdown();
     });
 
     socket.on("error", () => {
       sockets.delete(socket);
       clearSocketOwnership(socket);
+      scheduleIdleShutdown();
     });
   });
 
